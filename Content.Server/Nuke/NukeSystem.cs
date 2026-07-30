@@ -22,11 +22,15 @@ using Robust.Shared.Map.Components;
 using Robust.Shared.Random;
 using Robust.Shared.Utility;
 using Robust.Shared.Timing;
+using Content.Shared.Doors.Components; // Fire edit
+using Content.Server.Doors.Systems; // Fire edit
+using Content.Shared.Access.Components; // Fire edit
 
 namespace Content.Server.Nuke;
 
 public sealed class NukeSystem : EntitySystem
 {
+    [Dependency] private readonly DoorSystem _door = default!; // Fire edit
     [Dependency] private readonly AlertLevelSystem _alertLevel = default!;
     [Dependency] private readonly ChatSystem _chatSystem = default!;
     [Dependency] private readonly ExplosionSystem _explosions = default!;
@@ -518,6 +522,28 @@ public sealed class NukeSystem : EntitySystem
 
         // Fire edit start
         _chatSystem.DispatchStationAnnouncement(stationUid ?? uid, announcement, sender, playDefault: false, colorOverride: Color.Red, announcementSound: _nukeArmSound);
+
+        var doorQuery = EntityQueryEnumerator<DoorComponent>();
+        while (doorQuery.MoveNext(out var doorId, out _))
+        {
+            if (Transform(doorId).ParentUid != Transform(uid).ParentUid)
+                continue;
+
+            if (!HasComp<AccessReaderComponent>(doorId))
+                continue; // Для исключения обычных дверей (деревянные, стальные и т.д.)
+
+            if (!TryComp<DoorBoltComponent>(doorId, out var doorBoltComp))
+            {
+                _door.TryOpen(doorId);
+                continue;
+            }
+
+            if (_door.IsBolted(doorId))
+                _door.TrySetBoltDown((doorId, doorBoltComp), false);
+
+            _door.TryOpen(doorId);
+            _door.TrySetBoltDown((doorId, doorBoltComp), true);
+        }
         // Fire edit end
 
         _sound.PlayGlobalOnStation(uid, _audio.ResolveSound(component.ArmSound));
@@ -576,6 +602,18 @@ public sealed class NukeSystem : EntitySystem
         // disable sound and reset it
         component.PlayedAlertSound = false;
         component.AlertAudioStream = _audio.Stop(component.AlertAudioStream);
+
+        // Fire edit start
+        var doorQuery = EntityQueryEnumerator<DoorComponent>();
+        while (doorQuery.MoveNext(out var doorId, out _))
+        {
+            if (Transform(doorId).ParentUid != Transform(uid).ParentUid)
+                continue;
+
+            if (TryComp<DoorBoltComponent>(doorId, out var doorBoltComp))
+                _door.TrySetBoltDown((doorId, doorBoltComp), false);
+        }
+        // Fire edit end
 
         // turn off the spinny light
         _pointLight.SetEnabled(uid, false);
